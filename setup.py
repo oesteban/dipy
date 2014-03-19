@@ -78,10 +78,12 @@ from setup_helpers import install_scripts_bat
 # Define extensions
 EXTS = []
 for modulename, other_sources in (
+    ('dipy.reconst._peakdg', []),
     ('dipy.reconst.recspeed', []),
     ('dipy.reconst.vec_val_sum', []),
     ('dipy.reconst.quick_squash', []),
     ('dipy.tracking.distances', []),
+    ('dipy.tracking.localtrack', []),
     ('dipy.tracking.vox2track', []),
     ('dipy.tracking.propspeed', []),
     ('dipy.denoise.denspeed', [])):
