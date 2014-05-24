@@ -83,7 +83,10 @@ for modulename, other_sources in (
     ('dipy.reconst.vec_val_sum', []),
     ('dipy.reconst.quick_squash', []),
     ('dipy.tracking.distances', []),
-    ('dipy.tracking.localtrack', []),
+    ('dipy.tracking.local.localtrack', []),
+    ('dipy.tracking.local.direction_getter', []),
+    ('dipy.tracking.local.tissue_classifier', []),
+    ('dipy.tracking.local.interpolation', []),
     ('dipy.tracking.vox2track', []),
     ('dipy.tracking.propspeed', []),
     ('dipy.denoise.denspeed', [])):
