@@ -1551,6 +1551,7 @@ def restore_fit_tensor(design_matrix, data, min_signal=1.0, sigma=None,
 
     if len(invalid_vox) > 0:
         import nibabel as nb
+        import os.path as op
         nb.Nifti1Image(np.array(invalid_vox, dtype=np.float32),
                        None, None).to_filename(op.abspath('invalid_vox.nii.gz'))
 
