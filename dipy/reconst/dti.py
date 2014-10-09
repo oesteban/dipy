@@ -1542,7 +1542,12 @@ def restore_fit_tensor(design_matrix, data, min_signal=1.0, sigma=None,
         # OLS solution in this voxel:
         except np.linalg.LinAlgError:
             invalid_vox.append(flat_data[vox]) 
-            dti_params[vox, :] = decompose_tensor(from_lower_triangular(start_params))
+            try:
+                dti_params[vox, :] = decompose_tensor(from_lower_triangular(start_params))
+            except:
+                dti_params[vox, :] = 0.
+                print('OLS failed to converge in voxel %d' %vox)
+                pass
 
     if len(invalid_vox) > 0:
         import nibabel as nb
