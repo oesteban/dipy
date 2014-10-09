@@ -1469,6 +1469,7 @@ def restore_fit_tensor(design_matrix, data, min_signal=1.0, sigma=None,
     ols_params = np.reshape(D, (-1, D.shape[-1]))
     # 12 parameters per voxel (evals + evecs):
     dti_params = np.empty((flat_data.shape[0], 12))
+    invalid_vox = []
     for vox in range(flat_data.shape[0]):
         start_params = ols_params[vox]
         # Do nlls using sigma weighting in this voxel:
@@ -1540,8 +1541,14 @@ def restore_fit_tensor(design_matrix, data, min_signal=1.0, sigma=None,
         # If leastsq failed to converge and produced nans, we'll resort to the
         # OLS solution in this voxel:
         except np.linalg.LinAlgError:
-            print(vox)
-            dti_params[vox, :] = start_params
+            invalid_vox.append(flat_data[vox]) 
+            dti_params[vox, :] = decompose_tensor(from_lower_triangular(start_params))
+
+    if len(invalid_vox) > 0:
+        import nibabel as nb
+        nb.Nifti1Image(np.array(invalid_vox, dtype=np.float32),
+                       None, None).to_filename(op.abspath('invalid_vox.nii.gz'))
+
     dti_params.shape = data.shape[:-1] + (12,)
     restore_params = dti_params
     return restore_params
