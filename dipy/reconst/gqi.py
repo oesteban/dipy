@@ -168,7 +168,10 @@ class GeneralizedQSamplingFit(ReconstFit):
             @ self.model.kernel
         )
 
-        return (K @ self.data.T).T
+        predicted = (K @ self.data.T).T
+
+        # Clamp to non-negative values
+        return np.maximum(predicted, 0)
 
 
 def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
