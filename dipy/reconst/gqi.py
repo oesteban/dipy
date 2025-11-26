@@ -153,7 +153,7 @@ class GeneralizedQSamplingFit(ReconstFit):
         )
         return self.data @ kernel
 
-    def odf_old(self, sphere):
+    def odf_old(self):
         """Calculates the discrete ODF for a given discrete sphere."""
         return self.model.kernel @ self.data
 
