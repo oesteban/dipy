@@ -157,6 +157,8 @@ class GeneralizedQSamplingFit(ReconstFit):
         """Calculates the discrete ODF for a given discrete sphere."""
         return self.model.kernel @ self.data
 
+    # TODO: Check why there is such a different correlation between
+    #       standard and gqi2 methods
     def predict(self, gtab, *, S0=None):
         """Predict using the fit model."""
         K = (
@@ -164,11 +166,27 @@ class GeneralizedQSamplingFit(ReconstFit):
                 gtab,
                 self.model.Lambda,
                 self.model.sphere,
+                self.model.method,
             )
             @ self.model.kernel
         )
 
-        predicted = (K @ self.data.T).T
+        # TODO: Add the multi voxel handling ?
+
+        # Handle both 1D (single voxel) and multi-dimensional data
+        if self.data.ndim == 1:
+            # Single voxel case
+            predicted = K @ self.data
+        else:
+            # Multi-voxel case - reshape for matrix multiplication
+            original_shape = self.data.shape
+            data_2d = self.data.reshape(-1, original_shape[-1])
+            predicted_2d = (K @ data_2d.T).T
+            predicted = predicted_2d.reshape(original_shape[:-1] + (K.shape[0],))
+
+        # Old single voxel predicted
+        # predicted = (K @ self.data.T).T
+        # WARNING: Is this meaningful ?
 
         # Clamp to non-negative values
         return np.maximum(predicted, 0)
