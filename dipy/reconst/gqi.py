@@ -160,6 +160,65 @@ class GeneralizedQSamplingFit(ReconstFit):
     # TODO: Check why there is such a different correlation between
     #       standard and gqi2 methods
     def predict(self, gtab, *, S0=None):
+        r"""Predict diffusion signals using the fitted model.
+
+        This method reconstructs predicted signals for the given gradient table
+        based on the fitted signal data (`self.data`) and the model's internal
+        GQI kernel. The orientation distribution function (ODF) is computed
+        internally from the fitted data and is not provided externally.
+
+        Parameters
+        ----------
+        gtab : GradientTable
+            The gradient table for which to predict signals.
+        S0 : array-like, optional
+            The baseline signal (b=0). If None, estimated from the model or data.
+
+        Returns
+        -------
+        pred_signal : ndarray
+            Predicted diffusion-weighted signal for the input `gtab`.
+
+        Notes
+        -----
+        The predicted signal is reconstructed as:
+
+        .. math::
+
+            \mathbf{S}_\mathrm{pred} = \mathrm{ODF} \cdot \mathbf{P}
+
+        where:
+            - \(\mathrm{ODF} = \mathbf{S}_\mathrm{data} \cdot \mathbf{K}\) is the
+            orientation distribution function computed internally from the
+            fitted signal data (\(\mathbf{S}_\mathrm{data}\)) and the forward
+            kernel (\(\mathbf{K}\)),
+            - \(\mathbf{P}\) is the reconstruction kernel (e.g., the pseudo-inverse
+            of \(\mathbf{K}\)), precomputed during model fitting.
+        """
+        P = prediction_kernel(
+            gtab,
+            self.model.Lambda,
+            self.model.sphere,
+            self.model.method,
+        )
+
+        # Handle both 1D (single voxel) and multi-dimensional data
+        if self.data.ndim == 1:
+            # Single voxel case
+            ODF = self.model.kernel @ self.data
+            predicted = ODF @ P
+        else:
+            # Multi-voxel case - reshape for matrix multiplication
+            original_shape = self.data.shape
+            data_2d = self.data.reshape(-1, original_shape[-1])
+            ODF_2d = self.model.kernel @ data_2d.T  # shape (n_vertices, n_voxels)
+            predicted_2d = ODF_2d.T @ P  # shape (n_voxels, n_gradients)
+            predicted = predicted_2d.reshape(original_shape[:-1] + (P.shape[1],))
+
+        # Clamp to non-negative values
+        return np.maximum(predicted, 0)
+
+    def predict_old(self, gtab, *, S0=None):
         """Predict using the fit model."""
         K = (
             prediction_kernel(
@@ -205,6 +264,53 @@ def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
 
 
 def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
+    r"""
+    Compute the pseudo-inverse kernel for signal prediction from ODF in GQI.
+
+    This function generates the Moore-Penrose pseudo-inverse of the GQI kernel,
+    enabling reconstruction of diffusion signals from orientation distribution
+    functions (ODFs) using regularization.
+
+    Parameters
+    ----------
+    gtab : GradientTable
+        The gradient table for this prediction.
+    param_lambda : float
+        Regularization parameter for the pseudo-inverse.
+    sphere : Sphere
+        Spherical grid for ODF sampling.
+    method : str, optional
+        GQI method ("standard" or "gqi2").
+
+    Returns
+    -------
+    kernel : ndarray, shape (n_vertices, n_gradients)
+        The pseudo-inverse kernel matrix for signal reconstruction from ODF.
+
+    Notes
+    -----
+    This computes the Moore-Penrose pseudo-inverse of the GQI kernel K:
+
+    .. math::
+
+        \mathbf{P} = (\mathbf{K}^T \mathbf{K} + \lambda \mathbf{I})^{-1} \mathbf{K}^T
+
+    Where:
+        - \(\mathbf{K}\) is the GQI kernel
+        - \(\lambda\) is the regularization parameter
+        - \(\mathbf{I}\) is the identity matrix.
+
+    This pseudo-inverse solves S from ODF = S @ K in the DIPY convention.
+
+    """
+    # K.shape = (n_gradients, n_vertices)
+    K = gqi_kernel(gtab, param_lambda, sphere, method=method)
+    GtG = K.T @ K
+    identity = np.eye(GtG.shape[0])
+    return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K.T
+
+
+def prediction_kernel_old(gtab, param_lambda, sphere, method="standard"):
     r"""
     Predict a signal given the ODF.
 

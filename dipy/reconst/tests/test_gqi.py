@@ -315,12 +315,10 @@ def test_predict_roundtrip_multi_voxel():
 
 
 def test_predict_single_held_out_gradient():
-    return
     data, gtab = dsi_voxels()  # data.shape = (X, Y, Z, N), gtab has N gradients
 
     np.random.seed(42)
     N = len(gtab.bvals)
-    print(N)
 
     # Hold out exactly one gradient direction
     held_out_idx = np.random.randint(0, N)
@@ -361,7 +359,6 @@ def test_predict_single_held_out_gradient():
 
 
 def test_predict_unseen_data():
-    return
     data, gtab = dsi_voxels()  # data.shape = (X, Y, Z, N), gtab has N gradients
 
     np.random.seed(42)
