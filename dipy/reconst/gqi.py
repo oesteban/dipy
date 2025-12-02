@@ -171,8 +171,6 @@ class GeneralizedQSamplingFit(ReconstFit):
             @ self.model.kernel
         )
 
-        # TODO: Add the multi voxel handling ?
-
         # Handle both 1D (single voxel) and multi-dimensional data
         if self.data.ndim == 1:
             # Single voxel case
@@ -183,10 +181,6 @@ class GeneralizedQSamplingFit(ReconstFit):
             data_2d = self.data.reshape(-1, original_shape[-1])
             predicted_2d = (K @ data_2d.T).T
             predicted = predicted_2d.reshape(original_shape[:-1] + (K.shape[0],))
-
-        # Old single voxel predicted
-        # predicted = (K @ self.data.T).T
-        # WARNING: Is this meaningful ?
 
         # Clamp to non-negative values
         return np.maximum(predicted, 0)
