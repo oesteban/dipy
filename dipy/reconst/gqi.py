@@ -195,7 +195,7 @@ class GeneralizedQSamplingFit(ReconstFit):
             - \(\mathbf{P}\) is the reconstruction kernel (e.g., the pseudo-inverse
             of \(\mathbf{K}\)), precomputed during model fitting.
         """
-        P = prediction_kernel(
+        K_plus = prediction_kernel(
             gtab,
             self.model.Lambda,
             self.model.sphere,
@@ -206,14 +206,14 @@ class GeneralizedQSamplingFit(ReconstFit):
         if self.data.ndim == 1:
             # Single voxel case
             ODF = self.model.kernel @ self.data
-            predicted = ODF @ P
+            predicted = ODF @ K_plus
         else:
             # Multi-voxel case - reshape for matrix multiplication
             original_shape = self.data.shape
             data_2d = self.data.reshape(-1, original_shape[-1])
             ODF_2d = self.model.kernel @ data_2d.T  # shape (n_vertices, n_voxels)
-            predicted_2d = ODF_2d.T @ P  # shape (n_voxels, n_gradients)
-            predicted = predicted_2d.reshape(original_shape[:-1] + (P.shape[1],))
+            predicted_2d = ODF_2d.T @ K_plus  # shape (n_voxels, n_gradients)
+            predicted = predicted_2d.reshape(original_shape[:-1] + (K_plus.shape[1],))
 
         # Clamp to non-negative values
         return np.maximum(predicted, 0)
