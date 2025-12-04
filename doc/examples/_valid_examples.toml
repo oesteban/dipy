@@ -98,6 +98,7 @@ files = [
     "reconst_forecast.py",
     "reconst_fwdti.py",
     "reconst_gqi.py",
+    "reconst_gqi_predict.py",
     "reconst_ivim.py",
     "reconst_mapmri.py",
     "reconst_msdki.py",
