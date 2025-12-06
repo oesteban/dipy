@@ -218,11 +218,11 @@ class GeneralizedQSamplingFit(ReconstFit):
             original_shape = self.data.shape
             data_2d = self.data.reshape(-1, original_shape[-1])
 
-            # ODF_2d.shape = (n_vertices, n_voxels)
-            ODF_2d = self.model.kernel @ data_2d.T
+            # ODF_2d.shape = (n_voxels, n_vertices)
+            ODF_2d = data_2d @ self.model.kernel.T
 
             # predicted_2d.shape = (n_voxels, n_gradients)
-            predicted_2d = ODF_2d.T @ K_plus
+            predicted_2d = ODF_2d @ K_plus
 
             # predicted.shape = (..., n_gradients)
             predicted = predicted_2d.reshape(original_shape[:-1] + (K_plus.shape[1],))
