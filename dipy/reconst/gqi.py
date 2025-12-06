@@ -195,6 +195,8 @@ class GeneralizedQSamplingFit(ReconstFit):
             - \(\mathbf{P}\) is the reconstruction kernel (e.g., the pseudo-inverse
             of \(\mathbf{K}\)), precomputed during model fitting.
         """
+
+        # K_plus.shape = (n_vertices, n_gradients)
         K_plus = prediction_kernel(
             gtab,
             self.model.Lambda,
@@ -204,15 +206,25 @@ class GeneralizedQSamplingFit(ReconstFit):
 
         # Handle both 1D (single voxel) and multi-dimensional data
         if self.data.ndim == 1:
-            # Single voxel case
+            # Single voxel: data = (self.model.n_gradients,)
+
+            # ODF.shape = (n_vertices, )
             ODF = self.model.kernel @ self.data
+
+            # predicted.shape = (n_gradients, )
             predicted = ODF @ K_plus
         else:
-            # Multi-voxel case - reshape for matrix multiplication
+            # Multi-voxel: data = (..., self.model.n_gradients)
             original_shape = self.data.shape
             data_2d = self.data.reshape(-1, original_shape[-1])
-            ODF_2d = self.model.kernel @ data_2d.T  # shape (n_vertices, n_voxels)
-            predicted_2d = ODF_2d.T @ K_plus  # shape (n_voxels, n_gradients)
+
+            # ODF_2d.shape = (n_vertices, n_voxels)
+            ODF_2d = self.model.kernel @ data_2d.T
+
+            # predicted_2d.shape = (n_voxels, n_gradients)
+            predicted_2d = ODF_2d.T @ K_plus
+
+            # predicted.shape = (..., n_gradients)
             predicted = predicted_2d.reshape(original_shape[:-1] + (K_plus.shape[1],))
 
         # Clamp to non-negative values
@@ -220,8 +232,10 @@ class GeneralizedQSamplingFit(ReconstFit):
 
     def predict_old(self, gtab, *, S0=None):
         """Predict using the fit model."""
+
+        # K.shape = (n_gradients, self.model.n_gradients)
         K = (
-            prediction_kernel(
+            prediction_kernel_old(
                 gtab,
                 self.model.Lambda,
                 self.model.sphere,
@@ -232,13 +246,19 @@ class GeneralizedQSamplingFit(ReconstFit):
 
         # Handle both 1D (single voxel) and multi-dimensional data
         if self.data.ndim == 1:
-            # Single voxel case
+            # Single voxel: data = (self.model.n_gradients,)
+
+            # predicted.shape = (n_gradients, )
             predicted = K @ self.data
         else:
-            # Multi-voxel case - reshape for matrix multiplication
+            # Multi-voxel: data = (..., self.model.n_gradients)
             original_shape = self.data.shape
             data_2d = self.data.reshape(-1, original_shape[-1])
+
+            # predicted_2d.shape = (n_voxels, n_gradients)
             predicted_2d = (K @ data_2d.T).T
+
+            # predicted.shape = (..., n_gradients)
             predicted = predicted_2d.reshape(original_shape[:-1] + (K.shape[0],))
 
         # Clamp to non-negative values
@@ -300,13 +320,19 @@ def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
         - \(\lambda\) is the regularization parameter
         - \(\mathbf{I}\) is the identity matrix.
 
-    This pseudo-inverse solves S from ODF = S @ K in the DIPY convention.
-
     """
     # K.shape = (n_gradients, n_vertices)
     K = gqi_kernel(gtab, param_lambda, sphere, method=method)
+
+    # GTG.shape = (n_vertices, n_vertices)
     GtG = K.T @ K
     identity = np.eye(GtG.shape[0])
+
+    # K_plus.shape = (n_vertices, n_gradients)
+    # WARNING: Since GTG is of size (n_vertices, n_vertices)
+    #          Inversing it takes way longer than in the old version
+    #          Where it's shape was (n_gradients, n_gradients)
+
     return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K.T
 
 
@@ -336,8 +362,12 @@ def prediction_kernel_old(gtab, param_lambda, sphere, method="standard"):
     """
     # K.shape = (n_gradients, n_vertices)
     K = gqi_kernel(gtab, param_lambda, sphere, method=method)
+
+    # GTG.shape = (n_gradients, n_gradients)
     GtG = K @ K.T
     identity = np.eye(GtG.shape[0])
+
+    # K_plus.shape = (n_gradients, n_vertices)
     return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K
 
 
