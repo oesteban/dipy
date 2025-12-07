@@ -8,6 +8,7 @@ from dipy.core.subdivide_octahedron import create_unit_sphere
 from dipy.reconst.base import ReconstFit, ReconstModel
 from dipy.testing.decorators import warning_for_keywords
 
+# TODO: Fine tune the INVERSE_LAMBDA ?
 INVERSE_LAMBDA = 1e-6
 DEFAULT_SPHERE_RECURSION_LEVEL = 5
 
@@ -284,56 +285,52 @@ def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
 
 
 def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
+    # TODO: Check docstring
     r"""
-    Compute the pseudo-inverse kernel for signal prediction from ODF in GQI.
+    Compute the regularized reconstruction kernel for ODF estimation in GQI.
 
-    This function generates the Moore-Penrose pseudo-inverse of the GQI kernel,
-    enabling reconstruction of diffusion signals from orientation distribution
-    functions (ODFs) using regularization.
+    This function computes the Tikhonov-regularized pseudo-inverse of the GQI
+    kernel matrix.
 
     Parameters
     ----------
     gtab : GradientTable
-        The gradient table for this prediction.
+        The gradient table specifying diffusion directions and b-values.
     param_lambda : float
-        Regularization parameter for the pseudo-inverse.
+        GQI scaling parameter
     sphere : Sphere
-        Spherical grid for ODF sampling.
+        Spherical grid defining the ODF sampling directions (vertices).
     method : str, optional
-        GQI method ("standard" or "gqi2").
+        GQI kernel method ("standard" or "gqi2").
 
     Returns
     -------
     kernel : ndarray, shape (n_vertices, n_gradients)
-        The pseudo-inverse kernel matrix for signal reconstruction from ODF.
+        The Tikhonov-regularized pseudo-inverse kernel matrix.
 
     Notes
     -----
-    This computes the Moore-Penrose pseudo-inverse of the GQI kernel K:
+    The pseudo-inverse kernel (K_plus) is computed as:
 
     .. math::
 
-        \mathbf{P} = (\mathbf{K}^T \mathbf{K} + \lambda \mathbf{I})^{-1} \mathbf{K}^T
+        \mathbf{K}^{+} =
+        \mathbf{K}^T \cdot (\mathbf{K} \mathbf{K}^T + \lambda \mathbf{I})^{-1}
 
-    Where:
-        - \(\mathbf{K}\) is the GQI kernel
-        - \(\lambda\) is the regularization parameter
-        - \(\mathbf{I}\) is the identity matrix.
-
+    where:
+        - \(\mathbf{K} \in \mathbb{R}^{n_g \times n_v}\) is the GQI kernel,
+        - \(\lambda = 1 \times 10^{-6}\) (fixed regularization strength),
+        - \(\mathbf{I}\) is the \(n_g \times n_g\) identity matrix.
     """
     # K.shape = (n_gradients, n_vertices)
     K = gqi_kernel(gtab, param_lambda, sphere, method=method)
 
-    # GTG.shape = (n_vertices, n_vertices)
-    GtG = K.T @ K
+    # GTG.shape = (n_gradients, n_gradients)
+    GtG = K @ K.T
     identity = np.eye(GtG.shape[0])
 
     # K_plus.shape = (n_vertices, n_gradients)
-    # WARNING: Since GTG is of size (n_vertices, n_vertices)
-    #          Inversing it takes way longer than in the old version
-    #          Where it's shape was (n_gradients, n_gradients)
-
-    return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K.T
+    return K.T @ np.linalg.inv(GtG + INVERSE_LAMBDA * identity)
 
 
 def prediction_kernel_old(gtab, param_lambda, sphere, method="standard"):

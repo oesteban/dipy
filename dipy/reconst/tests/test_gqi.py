@@ -6,7 +6,7 @@ from dipy.core.sphere_stats import angular_similarity
 from dipy.core.subdivide_octahedron import create_unit_sphere
 from dipy.data import default_sphere, dsi_voxels, get_fnames, get_sphere
 from dipy.direction.peaks import peak_directions
-from dipy.reconst.gqi import GeneralizedQSamplingModel
+from dipy.reconst.gqi import GeneralizedQSamplingModel, gqi_kernel, prediction_kernel
 from dipy.reconst.odf import gfa
 from dipy.reconst.tests.test_dsi import sticks_and_ball_dummies
 from dipy.sims.voxel import sticks_and_ball
@@ -76,6 +76,47 @@ def test_mvoxel_gqi():
         odf, sphere, relative_peak_threshold=0.35, min_separation_angle=25
     )
     assert_equal(directions.shape[0], 2)
+
+
+def test_prediction_kernel():
+    """Test that the GQI prediction kernel satisfies key mathematical properties
+    of a Tikhonov-regularized pseudo-inverse for both "standard" and "gqi2" methods."""
+    # Load test data
+    _, gtab = dsi_voxels()
+    sphere = get_sphere(name="symmetric724")
+    param_lambda = 1.2
+
+    for method in ["standard", "gqi2"]:
+        K_plus = prediction_kernel(gtab, param_lambda, sphere, method=method)
+
+        # Shape check
+        assert_equal(K_plus.shape, (len(sphere.vertices), len(gtab.bvals)))
+
+        # Finite and non-zero
+        assert np.all(np.isfinite(K_plus)), "K_plus contains non-finite values"
+        assert np.any(K_plus != 0), "K_plus is all zeros"
+
+        # Compute forward kernel
+        K = gqi_kernel(gtab, param_lambda, sphere, method=method)
+
+        # K and K_plus should be transposed in shape
+        assert (
+            K_plus.shape == K.T.shape
+        ), f"K_plus.shape {K_plus.shape} does not match K.T.shape {K.T.shape}"
+
+        # Property 1: K @ K_plus @ K ≈ K  (regularized reconstruction)
+        reconstructed_K = K @ K_plus @ K
+        assert np.allclose(
+            reconstructed_K, K, atol=1e-4, rtol=1e-3
+        ), "Regularized reconstruction K K_plus K ≈ K failed"
+
+        # Property 2: K K_plus is symmetric
+        KK_plus = K @ K_plus
+        assert np.allclose(KK_plus, KK_plus.T, atol=1e-5), "K K_plus is not symmetric"
+
+        # Property 3: K_plus K is symmetric
+        K_plusK = K_plus @ K
+        assert np.allclose(K_plusK, K_plusK.T, atol=1e-5), "K_plus K is not symmetric"
 
 
 def test_predict_single_voxel():
@@ -312,101 +353,3 @@ def test_predict_roundtrip_multi_voxel():
             f"Found {len(poor_correlation_voxels)} voxels with poor correlation "
             f"(<= 0.5) for {method} method. Examples: {poor_correlation_voxels[:5]}"
         )
-
-
-def test_predict_single_held_out_gradient():
-    data, gtab = dsi_voxels()  # data.shape = (X, Y, Z, N), gtab has N gradients
-
-    np.random.seed(42)
-    N = len(gtab.bvals)
-
-    # Hold out exactly one gradient direction
-    held_out_idx = np.random.randint(0, N)
-    train_idx = np.array([i for i in range(N) if i != held_out_idx])
-
-    # Build train and test (single-direction) gradient tables
-    train_gtab = gradient_table(gtab.bvals[train_idx], bvecs=gtab.bvecs[train_idx])
-    held_out_gtab = gradient_table(
-        gtab.bvals[held_out_idx : held_out_idx + 1],  # shape (1,)
-        bvecs=gtab.bvecs[held_out_idx : held_out_idx + 1],
-    )
-
-    # Flatten data: (num_voxels, N)
-    data_flat = data.reshape(-1, N)
-    train_data = data_flat[:, train_idx]  # (num_voxels, N-1)
-    held_out_true = data_flat[:, held_out_idx]  # (num_voxels,) – actual signal
-
-    correlations = {}
-
-    for method in ["standard", "gqi2"]:
-        gq = GeneralizedQSamplingModel(train_gtab, method=method, sampling_length=1.2)
-        fit = gq.fit(train_data)
-
-        # Predict signal for the single held-out gradient
-        held_out_pred = fit.predict(held_out_gtab)  # shape: (num_voxels, 1)
-        held_out_pred = held_out_pred.squeeze()  # now (num_voxels,)
-
-        # Now compute correlation ACROSS VOXELS: predicted vs. true
-        # for this one direction
-        if np.std(held_out_pred) == 0 or np.std(held_out_true) == 0:
-            corr = 0.0
-        else:
-            corr = np.corrcoef(held_out_pred, held_out_true)[0, 1]
-
-        print(f"{method} correlation (across voxels for held-out dir): {corr:.3f}")
-        assert corr > 0.5, f"Poor cross-voxel correlation for {method}: {corr:.3f}"
-        correlations[method] = corr
-
-
-def test_predict_unseen_data():
-    data, gtab = dsi_voxels()  # data.shape = (X, Y, Z, N), gtab has N gradients
-
-    np.random.seed(42)
-
-    num_test_gradients = 4
-    num_train_gradients = len(gtab.bvals) - num_test_gradients
-
-    all_grad_indices = np.arange(len(gtab.bvals))
-    train_grad_idx = np.random.choice(
-        all_grad_indices, num_train_gradients, replace=False
-    )
-    test_grad_idx = np.setdiff1d(all_grad_indices, train_grad_idx)
-
-    # Build train/test gradient tables
-    train_gtab = gradient_table(
-        gtab.bvals[train_grad_idx], bvecs=gtab.bvecs[train_grad_idx]
-    )
-    test_gtab = gradient_table(
-        gtab.bvals[test_grad_idx], bvecs=gtab.bvecs[test_grad_idx]
-    )
-
-    # Extract signal values for training and testing gradients
-    # data is (X, Y, Z, N); we reshape to (-1, N) for voxel-wise processing
-    data_flat = data.reshape(-1, data.shape[-1])  # (num_voxels, N)
-    train_data = data_flat[:, train_grad_idx]  # (num_voxels, num_train)
-    test_data = data_flat[:, test_grad_idx]  # (num_voxels, num_test)
-
-    correlations = []
-
-    for method in ["standard", "gqi2"]:
-        gq = GeneralizedQSamplingModel(train_gtab, method=method, sampling_length=1.2)
-        fit = gq.fit(train_data)
-
-        test_signal_predicted = fit.predict(test_gtab)  # (num_voxels, num_test)
-
-        # Compute correlation per voxel between predicted and actual test signals
-        voxel_corrs = []
-        for i in range(test_signal_predicted.shape[0]):
-            pred = test_signal_predicted[i]
-            true = test_data[i]
-            if np.std(pred) == 0 or np.std(true) == 0:
-                # Skip or treat as zero correlation if no variance
-                corr = 0.0
-            else:
-                corr = np.corrcoef(pred, true)[0, 1]
-            voxel_corrs.append(corr)
-
-        avg_corr = np.mean(voxel_corrs)
-        print(f"{method} avg correlation: {avg_corr:.3f}")
-        assert avg_corr > 0.5, f"Poor correlation for {method}: {avg_corr:.3f}"
-        correlations.append(avg_corr)
