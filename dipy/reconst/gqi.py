@@ -205,28 +205,28 @@ class GeneralizedQSamplingFit(ReconstFit):
             self.model.method,
         )
 
+        # Fuse kernel and prediction kernel to avoid explicit ODF computation:
+        # combined_kernel.shape = (n_gradients_original, n_gradients)
+        combined_kernel = self.model.kernel.T @ K_plus
+
         # Handle both 1D (single voxel) and multi-dimensional data
         if self.data.ndim == 1:
             # Single voxel: data = (self.model.n_gradients,)
 
-            # ODF.shape = (n_vertices, )
-            ODF = self.model.kernel @ self.data
-
             # predicted.shape = (n_gradients, )
-            predicted = ODF @ K_plus
+            predicted = self.data @ combined_kernel
         else:
             # Multi-voxel: data = (..., self.model.n_gradients)
             original_shape = self.data.shape
             data_2d = self.data.reshape(-1, original_shape[-1])
 
-            # ODF_2d.shape = (n_voxels, n_vertices)
-            ODF_2d = data_2d @ self.model.kernel.T
-
             # predicted_2d.shape = (n_voxels, n_gradients)
-            predicted_2d = ODF_2d @ K_plus
+            predicted_2d = data_2d @ combined_kernel
 
             # predicted.shape = (..., n_gradients)
-            predicted = predicted_2d.reshape(original_shape[:-1] + (K_plus.shape[1],))
+            predicted = predicted_2d.reshape(
+                original_shape[:-1] + (combined_kernel.shape[1],)
+            )
 
         # Clamp to non-negative values
         return np.maximum(predicted, 0)
