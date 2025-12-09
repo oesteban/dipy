@@ -102,6 +102,8 @@ class GeneralizedQSamplingModel(ReconstModel):
     def fit(self, data, **kwargs):
         return GeneralizedQSamplingFit(self, data)
 
+    # TODO: What should be done here ?
+    # TODO: How to test ?
     def predict(self, odf, *, S0=None):
         """
         Predict a signal for this GeneralizedQSamplingModel instance given parameters.
@@ -153,10 +155,6 @@ class GeneralizedQSamplingFit(ReconstFit):
             self.model.gtab, self.model.Lambda, sphere, method=self.model.method
         )
         return self.data @ kernel
-
-    def odf_old(self):
-        """Calculates the discrete ODF for a given discrete sphere."""
-        return self.model.kernel @ self.data
 
     # TODO: Check why there is such a different correlation between
     #       standard and gqi2 methods
@@ -231,40 +229,6 @@ class GeneralizedQSamplingFit(ReconstFit):
         # Clamp to non-negative values
         return np.maximum(predicted, 0)
 
-    def predict_old(self, gtab, *, S0=None):
-        """Predict using the fit model."""
-
-        # K.shape = (n_gradients, self.model.n_gradients)
-        K = (
-            prediction_kernel_old(
-                gtab,
-                self.model.Lambda,
-                self.model.sphere,
-                self.model.method,
-            )
-            @ self.model.kernel
-        )
-
-        # Handle both 1D (single voxel) and multi-dimensional data
-        if self.data.ndim == 1:
-            # Single voxel: data = (self.model.n_gradients,)
-
-            # predicted.shape = (n_gradients, )
-            predicted = K @ self.data
-        else:
-            # Multi-voxel: data = (..., self.model.n_gradients)
-            original_shape = self.data.shape
-            data_2d = self.data.reshape(-1, original_shape[-1])
-
-            # predicted_2d.shape = (n_voxels, n_gradients)
-            predicted_2d = (K @ data_2d.T).T
-
-            # predicted.shape = (..., n_gradients)
-            predicted = predicted_2d.reshape(original_shape[:-1] + (K.shape[0],))
-
-        # Clamp to non-negative values
-        return np.maximum(predicted, 0)
-
 
 def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
     # 0.01506 = 6*D where D is the free water diffusion coefficient
@@ -331,41 +295,6 @@ def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
 
     # K_plus.shape = (n_vertices, n_gradients)
     return K.T @ np.linalg.inv(GtG + INVERSE_LAMBDA * identity)
-
-
-def prediction_kernel_old(gtab, param_lambda, sphere, method="standard"):
-    r"""
-    Predict a signal given the ODF.
-
-    Parameters
-    ----------
-    odf : ndarray
-        ODF parameters.
-
-    gtab : GradientTable
-        The gradient table for this prediction
-
-    Notes
-    -----
-    The predicted signal is given by:
-
-    .. math::
-
-        S(\theta, b) = K_{ii}^{-1} \cdot ODF
-
-    where $K_{ii}^{-1}$, is the inverse of the GQI kernels for the direction(s) $ii$
-    given by ``gtab``.
-
-    """
-    # K.shape = (n_gradients, n_vertices)
-    K = gqi_kernel(gtab, param_lambda, sphere, method=method)
-
-    # GTG.shape = (n_gradients, n_gradients)
-    GtG = K @ K.T
-    identity = np.eye(GtG.shape[0])
-
-    # K_plus.shape = (n_gradients, n_vertices)
-    return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K
 
 
 @warning_for_keywords()

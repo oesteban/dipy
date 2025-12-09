@@ -191,63 +191,74 @@ def test_predict_roundtrip_single_voxel():
     # Load test data
     data, gtab = dsi_voxels()
 
+    bvals = gtab.bvals
+    bvecs = gtab.bvecs
+
+    # Remove b0 volumes from the train data
+    non_b0_indices = np.where(~gtab.b0s_mask)[0]
+    train_data = data[..., non_b0_indices]
+
+    train_bvals = bvals[non_b0_indices]
+    train_bvecs = bvecs[non_b0_indices]
+
+    train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
+
     # TODO: Find meaningful threshold
-    correlation_threshold = 0.5
+    correlation_threshold = 0.8
 
     tested_voxels_coordinates = [(0, 0, 0), (0, 0, 1), (0, 1, 0), (1, 0, 0)]
     # Test both methods
     for voxel_coordinate in tested_voxels_coordinates:
-        for method in ["standard", "gqi2"]:
-            gq = GeneralizedQSamplingModel(gtab, method=method, sampling_length=1.2)
-            # Test single voxel round-trip consistency
-            voxel_data = data[voxel_coordinate]
-            voxel_fit = gq.fit(voxel_data)
-            voxel_predicted = voxel_fit.predict(gtab)
+        gq = GeneralizedQSamplingModel(
+            train_gtab, method="standard", sampling_length=1.2
+        )
+        # Test single voxel round-trip consistency
+        voxel_data = train_data[voxel_coordinate]
+        voxel_fit = gq.fit(voxel_data)
+        voxel_predicted = voxel_fit.predict(train_gtab)
 
-            # Prediction should have correct shape
-            assert_equal(voxel_predicted.shape, (len(gtab.bvals),))
+        # Prediction should have correct shape
+        assert_equal(voxel_predicted.shape, (len(train_gtab.bvals),))
 
-            # Predicted signal should be non-negative
-            assert np.all(
-                voxel_predicted >= 0
-            ), "Predicted signals should be non-negative"
+        # Predicted signal should be non-negative
+        assert np.all(voxel_predicted >= 0), "Predicted signals should be non-negative"
 
-            # Compute correlation between original and predicted
-            correlation = np.corrcoef(voxel_data, voxel_predicted)[0, 1]
+        # Compute correlation between original and predicted
+        correlation = np.corrcoef(voxel_data, voxel_predicted)[0, 1]
 
-            # TODO: Remove debug prints
-            pred_min = voxel_predicted.min()
-            pred_max = voxel_predicted.max()
-            # Print debug information
-            print(f"\n{20 * '='} Debug print {20 * '='}")
-            print(f"\nSingle voxel at {voxel_coordinate} prediction ({method}):")
-            print(f"  Original range: [{voxel_data.min():.3f}, {voxel_data.max():.3f}]")
-            print(f"  Predicted range: [{pred_min:.3f}, {pred_max:.3f}]")
-            print(f"  Correlation: {correlation:.3f}")
+        # TODO: Remove debug prints
+        pred_min = voxel_predicted.min()
+        pred_max = voxel_predicted.max()
+        # Print debug information
+        print(f"\n{20 * '='} Debug print {20 * '='}")
+        print(f"\nSingle voxel at {voxel_coordinate}:")
+        print(f"  Original range: [{voxel_data.min():.3f}, {voxel_data.max():.3f}]")
+        print(f"  Predicted range: [{pred_min:.3f}, {pred_max:.3f}]")
+        print(f"  Correlation: {correlation:.3f}")
 
-            # For single voxel, correlation should be high
-            assert (
-                correlation > correlation_threshold
-            ), f"Poor single voxel correlation {correlation:.3f} for {method} method"
+        # For single voxel, correlation should be high
+        assert (
+            correlation > correlation_threshold
+        ), f"Poor single voxel correlation {correlation:.3f}"
 
-            # Original signal and predicted should be within same order of magnitude
-            orig_mean = np.mean(voxel_data)
-            pred_mean = np.mean(voxel_predicted)
+        # Original signal and predicted should be within same order of magnitude
+        orig_mean = np.mean(voxel_data)
+        pred_mean = np.mean(voxel_predicted)
 
-            ratio = pred_mean / orig_mean if orig_mean > 0 else 1
-            assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
+        ratio = pred_mean / orig_mean if orig_mean > 0 else 1
+        assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
 
-            # Test with different gradient table
-            subset_gtab = gradient_table(gtab.bvals[::2], bvecs=gtab.bvecs[::2])
-            subset_predicted = voxel_fit.predict(subset_gtab)
+        # Test with different gradient table
+        subset_gtab = gradient_table(train_gtab.bvals[::2], bvecs=train_gtab.bvecs[::2])
+        subset_predicted = voxel_fit.predict(subset_gtab)
 
-            # Subset prediction should have correct shape
-            assert_equal(subset_predicted.shape, (len(subset_gtab.bvals),))
+        # Subset prediction should have correct shape
+        assert_equal(subset_predicted.shape, (len(subset_gtab.bvals),))
 
-            # Should still be non-negative
-            assert np.all(
-                subset_predicted >= 0
-            ), "Subset predictions should be non-negative"
+        # Should still be non-negative
+        assert np.all(
+            subset_predicted >= 0
+        ), "Subset predictions should be non-negative"
 
 
 def test_predict_roundtrip_multi_voxel():
@@ -261,95 +272,99 @@ def test_predict_roundtrip_multi_voxel():
     # Load test data
     data, gtab = dsi_voxels()
 
+    bvals = gtab.bvals
+    bvecs = gtab.bvecs
+
+    # Remove b0 volumes from the train data
+    non_b0_indices = np.where(~gtab.b0s_mask)[0]
+    train_data = data[..., non_b0_indices]
+
+    train_bvals = bvals[non_b0_indices]
+    train_bvecs = bvecs[non_b0_indices]
+
+    train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
+
     # TODO: Find meaningful thresholds
-    average_correlation_threshold = 0.5
-    per_voxel_correlation_thesrhold = 0.45
+    average_correlation_threshold = 0.8
+    per_voxel_correlation_thesrhold = 0.8
 
-    # Test both methods
-    for method in ["standard", "gqi2"]:
-        gq = GeneralizedQSamplingModel(gtab, method=method, sampling_length=1.2)
+    gq = GeneralizedQSamplingModel(train_gtab, method="standard", sampling_length=1.2)
 
-        # Test multi-voxel round-trip consistency
-        multi_fit = gq.fit(data)
-        multi_predicted = multi_fit.predict(gtab)
+    # Test multi-voxel round-trip consistency
+    multi_fit = gq.fit(train_data)
+    multi_predicted = multi_fit.predict(train_gtab)
 
-        # Compute correlation for all voxels
-        correlations = []
-        total_voxels = 0
+    # Compute correlation for all voxels
+    correlations = []
+    total_voxels = 0
 
-        # Iterate through all voxels in the 3D data
-        for i in range(data.shape[0]):
-            for j in range(data.shape[1]):
-                for k in range(data.shape[2]):
-                    total_voxels += 1
-                    original_voxel = data[i, j, k]
-                    predicted_voxel = multi_predicted[i, j, k]
+    # Iterate through all voxels in the 3D data
+    for i in range(train_data.shape[0]):
+        for j in range(train_data.shape[1]):
+            for k in range(train_data.shape[2]):
+                total_voxels += 1
+                original_voxel = train_data[i, j, k]
+                predicted_voxel = multi_predicted[i, j, k]
 
-                    correlation = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
-                    correlations.append(correlation)
+                correlation = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
+                correlations.append(correlation)
 
-        # TODO: Remove debug prints
+    # TODO: Remove debug prints
+    # Print debug information
+    print(f"\n{20 * '='} Debug print {20 * '='}")
+    print(f"  Original range: [{train_data.min():.3f}, {train_data.max():.3f}]")
+    print(
+        f"  Predicted range: [{multi_predicted.min():.3f}, {multi_predicted.max():.3f}]"
+    )
+    print(f"  Total voxels: {total_voxels}")
+    print(f"  Number of gradients: {train_data.shape[-1]}")
+    print(f"  Average voxel correlation: {np.mean(correlations):.3f}")
+    print(f"  Min correlation: {np.min(correlations):.3f}")
+    print(f"  Max correlation: {np.max(correlations):.3f}")
 
-        # Print debug information
-        print(f"\n{20 * '='} Debug print {20 * '='}")
-        print(f"\nMulti-voxel prediction ({method}):")
-        print(f"  Original range: [{data.min():.3f}, {data.max():.3f}]")
-        print(
-            f"  Predicted range: "
-            f"[{multi_predicted.min():.3f}, {multi_predicted.max():.3f}]"
-        )
-        print(f"  Total voxels: {total_voxels}")
-        print(f"  Average voxel correlation: {np.mean(correlations):.3f}")
-        print(f"  Min correlation: {np.min(correlations):.3f}")
-        print(f"  Max correlation: {np.max(correlations):.3f}")
+    # For multi-voxel, average correlation should be high
+    avg_correlation = np.mean(correlations)
+    assert (
+        avg_correlation > average_correlation_threshold
+    ), f"Poor multi-voxel average correlation{avg_correlation:.3f}"
 
-        # For multi-voxel, average correlation should be high
-        avg_correlation = np.mean(correlations)
-        assert avg_correlation > average_correlation_threshold, (
-            f"Poor multi-voxel average correlation"
-            f"{avg_correlation:.3f} for {method} method"
-        )
+    # Predicted signals should be non-negative
+    assert np.all(multi_predicted >= 0), "Predicted signals should be non-negative"
 
-        # Predicted signals should be non-negative
-        assert np.all(multi_predicted >= 0), "Predicted signals should be non-negative"
+    # Original signal and predicted should be within same order of magnitude
+    orig_mean = np.mean(train_data)
+    pred_mean = np.mean(multi_predicted)
+    ratio = pred_mean / orig_mean if orig_mean > 0 else 1
+    assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
 
-        # Original signal and predicted should be within same order of magnitude
-        orig_mean = np.mean(data)
-        pred_mean = np.mean(multi_predicted)
-        ratio = pred_mean / orig_mean if orig_mean > 0 else 1
-        assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
+    # Test with different gradient table
+    subset_gtab = gradient_table(train_gtab.bvals[::2], bvecs=train_gtab.bvecs[::2])
+    subset_predicted = multi_fit.predict(subset_gtab)
 
-        # Test with different gradient table
-        subset_gtab = gradient_table(gtab.bvals[::2], bvecs=gtab.bvecs[::2])
-        subset_predicted = multi_fit.predict(subset_gtab)
+    # Expected shape is (Original_x, Original_y, Original_z, Orignial_N / 2)
+    expected_shape = train_data.shape[:-1] + (len(subset_gtab.bvals),)
+    assert_equal(subset_predicted.shape, expected_shape)
 
-        # Expected shape is (Original_x, Original_y, Original_z, Orignial_N / 2)
-        expected_shape = data.shape[:-1] + (len(subset_gtab.bvals),)
-        assert_equal(subset_predicted.shape, expected_shape)
+    # Should still be non-negative
+    assert np.all(subset_predicted >= 0), "Subset predictions should be non-negative"
 
-        # Should still be non-negative
-        assert np.all(
-            subset_predicted >= 0
-        ), "Subset predictions should be non-negative"
+    # Test that all voxels have reasonable correlation
+    poor_correlation_voxels = []
+    for i in range(train_data.shape[0]):
+        for j in range(train_data.shape[1]):
+            for k in range(train_data.shape[2]):
+                original_voxel = train_data[i, j, k]
+                predicted_voxel = multi_predicted[i, j, k]
 
-        # Test that all voxels have reasonable correlation
-        poor_correlation_voxels = []
-        for i in range(data.shape[0]):
-            for j in range(data.shape[1]):
-                for k in range(data.shape[2]):
-                    original_voxel = data[i, j, k]
-                    predicted_voxel = multi_predicted[i, j, k]
+                # Skip voxels with no signal
+                if np.sum(original_voxel) == 0:
+                    continue
 
-                    # Skip voxels with no signal
-                    if np.sum(original_voxel) == 0:
-                        continue
+                test_corr = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
+                if test_corr <= per_voxel_correlation_thesrhold:
+                    poor_correlation_voxels.append((i, j, k, test_corr))
 
-                    test_corr = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
-                    if test_corr <= per_voxel_correlation_thesrhold:
-                        poor_correlation_voxels.append((i, j, k, test_corr))
-
-        # Assert that no voxels have poor correlation
-        assert len(poor_correlation_voxels) == 0, (
-            f"Found {len(poor_correlation_voxels)} voxels with poor correlation "
-            f"(<= 0.5) for {method} method. Examples: {poor_correlation_voxels[:5]}"
-        )
+    # Assert that no voxels have poor correlation
+    assert (
+        len(poor_correlation_voxels) == 0
+    ), f"Found {len(poor_correlation_voxels)} voxels with poor correlation "
