@@ -8,7 +8,6 @@ from dipy.core.subdivide_octahedron import create_unit_sphere
 from dipy.reconst.base import ReconstFit, ReconstModel
 from dipy.testing.decorators import warning_for_keywords
 
-# TODO: Fine tune the INVERSE_LAMBDA ?
 INVERSE_LAMBDA = 1e-6
 DEFAULT_SPHERE_RECURSION_LEVEL = 5
 
@@ -156,9 +155,9 @@ class GeneralizedQSamplingFit(ReconstFit):
         )
         return self.data @ kernel
 
-    # TODO: Check why there is such a different correlation between
-    #       standard and gqi2 methods
+    # TODO: Fix the interceptor / scale issue
     def predict(self, gtab, *, S0=None):
+        # TODO: Double check docstring
         r"""Predict diffusion signals using the fitted model.
 
         This method reconstructs predicted signals for the given gradient table
@@ -249,7 +248,7 @@ def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
 
 
 def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
-    # TODO: Check docstring
+    # TODO: Double check docstring
     r"""
     Compute the regularized reconstruction kernel for ODF estimation in GQI.
 

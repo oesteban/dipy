@@ -1,3 +1,4 @@
+# TODO: Finish and cleanup the example (also check the outputted images and prints)
 """
 ===============================================
 Predict unseen data with Generalized Q-Sampling Imaging

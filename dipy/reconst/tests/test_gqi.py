@@ -180,13 +180,13 @@ def test_predict_multi_voxel():
         ), "Subset predictions should be non-negative"
 
 
-# TODO: Check why there is such a different correlation between
-#       standard and gqi2 methods
 def test_predict_roundtrip_single_voxel():
     """Verify that GQI single voxel predictions maintain high correlation
     with original signals
 
     Here only 1 voxel is fitted to the model and compared to it's prediction
+
+    Note that the b0 volumes are excluded from the train and test sets
     """
     # Load test data
     data, gtab = dsi_voxels()
@@ -203,7 +203,6 @@ def test_predict_roundtrip_single_voxel():
 
     train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
 
-    # TODO: Find meaningful threshold
     correlation_threshold = 0.8
 
     tested_voxels_coordinates = [(0, 0, 0), (0, 0, 1), (0, 1, 0), (1, 0, 0)]
@@ -225,16 +224,6 @@ def test_predict_roundtrip_single_voxel():
 
         # Compute correlation between original and predicted
         correlation = np.corrcoef(voxel_data, voxel_predicted)[0, 1]
-
-        # TODO: Remove debug prints
-        pred_min = voxel_predicted.min()
-        pred_max = voxel_predicted.max()
-        # Print debug information
-        print(f"\n{20 * '='} Debug print {20 * '='}")
-        print(f"\nSingle voxel at {voxel_coordinate}:")
-        print(f"  Original range: [{voxel_data.min():.3f}, {voxel_data.max():.3f}]")
-        print(f"  Predicted range: [{pred_min:.3f}, {pred_max:.3f}]")
-        print(f"  Correlation: {correlation:.3f}")
 
         # For single voxel, correlation should be high
         assert (
@@ -267,6 +256,8 @@ def test_predict_roundtrip_multi_voxel():
 
     Here all voxels are fitted to the model
     each voxel is getting predicted back and compared to it's original data
+
+    Note that the b0 volumes are excluded from the train and test sets
     """
 
     # Load test data
@@ -284,7 +275,6 @@ def test_predict_roundtrip_multi_voxel():
 
     train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
 
-    # TODO: Find meaningful thresholds
     average_correlation_threshold = 0.8
     per_voxel_correlation_thesrhold = 0.8
 
@@ -308,19 +298,6 @@ def test_predict_roundtrip_multi_voxel():
 
                 correlation = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
                 correlations.append(correlation)
-
-    # TODO: Remove debug prints
-    # Print debug information
-    print(f"\n{20 * '='} Debug print {20 * '='}")
-    print(f"  Original range: [{train_data.min():.3f}, {train_data.max():.3f}]")
-    print(
-        f"  Predicted range: [{multi_predicted.min():.3f}, {multi_predicted.max():.3f}]"
-    )
-    print(f"  Total voxels: {total_voxels}")
-    print(f"  Number of gradients: {train_data.shape[-1]}")
-    print(f"  Average voxel correlation: {np.mean(correlations):.3f}")
-    print(f"  Min correlation: {np.min(correlations):.3f}")
-    print(f"  Max correlation: {np.max(correlations):.3f}")
 
     # For multi-voxel, average correlation should be high
     avg_correlation = np.mean(correlations)
