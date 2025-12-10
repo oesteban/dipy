@@ -25,7 +25,7 @@ For the registration step, you can refer to the
 <sphx_glr_examples_built_registration_affine_registration_3d.py>`
 
 We will also leave out 2 orientations instead of 1 to make the final comparison
-more meaningful
+more meaningful.
 
 
 First import the necessary python modules:
@@ -57,26 +57,26 @@ print(f"data.shape {data.shape}")
 
 ###############################################################################
 # Display 5 random volumes to see what we are going to work with
-def plot_slice(data, bvals, vol_idx=0, z_slice=None, title_prefix="Volume"):
+def plot_slice(data, bval, bvec, volume_idx, z_slice=None):
     """
-    Plot a single 2D slice from a 4D diffusion volume.
+    Plot a single axial slice from a 3D diffusion MRI volume.
 
     Parameters:
-    - data: 4D array of shape (X, Y, Z, N)
-    - bvals: 1D array of b-values (length N)
-    - vol_idx: which volume (4th dim) to show
-    - z_slice: axial slice index; if None, use middle slice
-    - title_prefix: label for the plot title
+    - data: 3D array of the volume (X, Y, Z)
+    - bval: b-value (in s/mm²) of the volume, shown in the title
+    - bvec: 3-element b-vector (diffusion gradient direction), shown in the title
+    - volume_idx: index of the volume in the original 4D dataset (used for labeling)
+    - z_slice: axial slice index along the Z dimension; if None, uses the central slice
     """
     if z_slice is None:
         z_slice = data.shape[2] // 2
 
-    vol = data[:, :, z_slice, vol_idx]
+    vol = data[:, :, z_slice]
 
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(10, 10))
 
     im = ax.imshow(vol, cmap="gray", origin="lower")
-    ax.set_title(f"{title_prefix} | Volume {vol_idx} (b={bvals[vol_idx]:.0f})")
+    ax.set_title(f"Volume {volume_idx} | bval ={bval} | bvec = {bvec}")
     ax.axis("off")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
@@ -87,16 +87,16 @@ def plot_slice(data, bvals, vol_idx=0, z_slice=None, title_prefix="Volume"):
 # Select 5 random slices to plot
 random_slices = np.random.choice(data.shape[-1], size=5, replace=False)
 for random_idx in random_slices:
-    plot_slice(data, bvals, random_idx)
+    plot_slice(data[..., random_idx], bvals[random_idx], bvecs[random_idx], random_idx)
 
 ###############################################################################
-# Split the data and gtab into train and test sets
+# Split the data and gtab into train and test sets.
 #
-# We have to be careful to remove all the b0 volumes from both sets
+# We have to be careful to remove all the b0 volumes from both sets.
 b0_indices = np.where(gtab.b0s_mask)[0]
 non_b0_indices = np.where(~gtab.b0s_mask)[0]
 
-# For comparison convenience we will actually leave out 2 orientations
+# For comparison convenience we leave out 2 orientations
 n_test = 2
 n_train = len(non_b0_indices) - n_test
 
@@ -120,6 +120,7 @@ train_bvecs = bvecs[train_idx]
 test_bvals = bvals[test_idx]
 test_bvecs = bvecs[test_idx]
 
+# Generate the new train and test gtabs
 train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
 test_gtab = gradient_table(bvals=test_bvals, bvecs=test_bvecs)
 
@@ -130,20 +131,19 @@ print(f"Number of train voxels: {train_data.size}")
 print(f"Number of test voxels: {test_data.size}")
 
 ###############################################################################
-# Compute a brain mask to make the computation faster
+# Now that our data is correctly prepared, we want to compute a brain mask to make
+# the computation faster
 masked_data, mask = median_otsu(data, vol_idx=[0])
 
 ###############################################################################
 # For each of the available GQI methods (standard and gqi2) we want to:
-#  - Create the according GQI model with the `train_gtabs`
-#  - Fit the `train_data` to the GQO model
-#  - Predict the unseen test data
-#  - Also predict an interceptor data (data the model generates for bval and bvec of 0)
+#
+#  1. Create the according GQI model with the `train_gtabs`
+#  2. Fit the `train_data` to the GQO model
+#  3. Predict the unseen test data
 
 methods = ["standard", "gqi2"]
 method_predicted_data = {method: {} for method in methods}
-
-interceptor_gtab = gradient_table(bvals=[0], bvecs=[[0, 0, 0]])
 
 for method in methods:
     # Build model
@@ -153,19 +153,17 @@ for method in methods:
     fit = model.fit(train_data, mask=mask)
 
     predicted_data = fit.predict(test_gtab)
-    interceptor_data = fit.predict(interceptor_gtab)
 
     method_predicted_data[method]["predicted_data"] = predicted_data
-    method_predicted_data[method]["interceptor_data"] = interceptor_data
 
 
 ###############################################################################
 # Plot a comparison of the predicted results, this includes:
+#
 #   - The left out data
 #   - The predicted data
-#   - The predictor data
-#   - A correlation map between the original data and it's prediction
-#   - A correlation map between the prediction and the predictor data
+#   - The b0 predicted data
+#   - A correlation map between the left data and it's prediction
 def local_correlation(real, pred, window_size=5):
     """
     Compute a local Pearson correlation map between `real` and `pred`.
@@ -199,29 +197,39 @@ def local_correlation(real, pred, window_size=5):
 
 
 def plot_all_methods_comparison(
-    test_data, test_bvals, method_predicted_data, vol_idx, z_slice=None, window_size=5
+    test_data,
+    method_predicted_data,
+    vol_idx,
+    test_bval,
+    test_bvec,
+    z_slice=None,
+    window_size=9,
 ):
     """
-    Plot real data, predictions from all methods, and local correlation maps.
-    Each method gets its own row: [Real | Predicted | Correlation]
+    Plot real data, predictions from all methods, and local Pearson correlation maps.
+    Each method gets its own row with three panels:
+        [Real | Predicted | Local Correlation].
 
     Parameters:
-    - test_data: ndarray of shape (H, W, D, V) — ground truth
-    - test_bvals: optional b-values for title annotation
-    - method_predicted_data: dict {method_name: prediction_array}
-    - vol_idx: which volume (4th dim) to visualize
-    - z_slice: which axial slice (3rd dim); defaults to middle
-    - window_size: size of local neighborhood for correlation (odd integer, e.g., 5)
+    - test_data: 3D array of ground-truth test volume (X, Y, Z)
+    - method_predicted_data:
+        dict mapping method names to prediction containers;
+        each value must contain a key "predicted_data" with a 4D array (X, Y, Z, N_vols)
+    - vol_idx: index of the test volume to visualize
+    - test_bval: b-value (in s/mm²) of the selected volume, shown in the plot title
+    - test_bvec: gradient direction of the selected volume, shown in the title
+    - z_slice: axial slice index along the Z dimension; if None, uses the central slice
+    - window_size: size of the square window for local correlation (must be odd)
     """
 
     if z_slice is None:
         z_slice = test_data.shape[2] // 2
 
-    real_vol = test_data[:, :, z_slice, vol_idx]
+    real_vol = test_data[:, :, z_slice]
     methods = list(method_predicted_data.keys())
     n_methods = len(methods)
 
-    fig, axes = plt.subplots(n_methods, 5, figsize=(16, 3.8 * n_methods))
+    fig, axes = plt.subplots(n_methods, 3, figsize=(13, 3.8 * n_methods))
 
     if n_methods == 1:
         axes = axes[None, :]
@@ -230,16 +238,10 @@ def plot_all_methods_comparison(
         pred_vol = method_predicted_data[method]["predicted_data"][
             :, :, z_slice, vol_idx
         ]
-        interceptor_vol = method_predicted_data[method]["interceptor_data"][
-            :, :, z_slice, -1
-        ]
 
         # Compute local correlation map
         real_pred_corr_map = local_correlation(
             real_vol, pred_vol, window_size=window_size
-        )
-        interceptor_pred_corr_map = local_correlation(
-            interceptor_vol, pred_vol, window_size=window_size
         )
 
         # Real
@@ -255,35 +257,21 @@ def plot_all_methods_comparison(
         axes[i, 1].axis("off")
         fig.colorbar(im_pred, ax=axes[i, 1], fraction=0.046, pad=0.04)
 
-        # Interceptor
-        im_interceptor = axes[i, 2].imshow(interceptor_vol, cmap="gray", origin="lower")
-        axes[i, 2].set_title(f"{method.upper()} interceptor", fontsize=12)
-        axes[i, 2].axis("off")
-        fig.colorbar(im_interceptor, ax=axes[i, 2], fraction=0.046, pad=0.04)
-
         # Local Correlation (real vs prediction)
-        im_corr = axes[i, 3].imshow(
+        im_corr = axes[i, 2].imshow(
             real_pred_corr_map, cmap="RdBu_r", origin="lower", vmin=-1, vmax=1
         )
-        axes[i, 3].set_title(
+        axes[i, 2].set_title(
             "Local Pearson Correlation\n(real vs prediction)", fontsize=12
         )
-        axes[i, 3].axis("off")
-        fig.colorbar(im_corr, ax=axes[i, 3], fraction=0.046, pad=0.04)
-
-        # Local Correlation (intercetor vs prediction)
-        im_corr = axes[i, 4].imshow(
-            interceptor_pred_corr_map, cmap="RdBu_r", origin="lower", vmin=-1, vmax=1
-        )
-        axes[i, 4].set_title(
-            "Local Pearson Correlation\n(interceptor vs prediction)", fontsize=12
-        )
-        axes[i, 4].axis("off")
-        fig.colorbar(im_corr, ax=axes[i, 4], fraction=0.046, pad=0.04)
+        axes[i, 2].axis("off")
+        fig.colorbar(im_corr, ax=axes[i, 2], fraction=0.046, pad=0.04)
 
     fig.suptitle(
-        f"Test Volume {vol_idx} | Z Slice {z_slice} | \
-          Corr window size {window_size} (b = {test_bvals[vol_idx]:.0f})",
+        f"Test Volume {vol_idx} | Z Slice {z_slice} | "
+        f"Corr window size {window_size} | "
+        f"bval = {test_bval:.0f} s/mm^2 | "
+        f"bvec = {test_bvec}",
         fontsize=14,
         y=0.98,
     )
@@ -293,9 +281,16 @@ def plot_all_methods_comparison(
 
 for i in range(len(test_idx)):
     plot_all_methods_comparison(
-        test_data, test_bvals, method_predicted_data, vol_idx=i, window_size=9
+        test_data[..., i],
+        method_predicted_data,
+        i,
+        test_bvals[i],
+        test_bvecs[i],
+        window_size=9,
     )
 ###############################################################################
+# We can see that the predicted left out orientation has
+# a higher SNR than the original data, while preserving signal information.
 #
 # References
 # ----------
