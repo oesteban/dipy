@@ -165,6 +165,7 @@ class GeneralizedQSamplingFit(ReconstFit):
         This method reconstructs predicted signals for the given gradient table
         based on the fitted signal data (``self.data``) and the model's internal
         GQI kernel.
+
         Parameters
         ----------
         gtab : GradientTable
@@ -189,10 +190,11 @@ class GeneralizedQSamplingFit(ReconstFit):
         Where:
 
         - :math:`\mathrm{ODF} = K_\mathrm{model} \cdot \mathbf{S}_\mathrm{data}` is
-          the ODF computed from the fitted signal data
-        - :math:`K^{+}` is the pseudo-inverse kernel from `prediction_kernel`
+          the ODF computed from the fitted signal data.
+        - :math:`K^{+}` is the pseudo-inverse kernel from `prediction_kernel`.
 
         Equivalently, this is here computed directly as:
+
         .. math::
 
             \mathbf{S}_\mathrm{pred} = \max(0, \mathbf{S}_\mathrm{data}
