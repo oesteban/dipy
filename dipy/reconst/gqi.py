@@ -148,8 +148,11 @@ class GeneralizedQSamplingFit(ReconstFit):
             self.odf_fit = self.odf(data)
         return self
 
-    def odf(self, sphere):
+    def odf(self, sphere=None):
         """Calculates the discrete ODF for a given discrete sphere."""
+        if sphere is None:
+            sphere = self.model.sphere
+
         kernel = gqi_kernel(
             self.model.gtab, self.model.Lambda, sphere, method=self.model.method
         )
@@ -157,14 +160,11 @@ class GeneralizedQSamplingFit(ReconstFit):
 
     # TODO: Fix the interceptor / scale issue
     def predict(self, gtab, *, S0=None):
-        # TODO: Double check docstring
         r"""Predict diffusion signals using the fitted model.
 
         This method reconstructs predicted signals for the given gradient table
-        based on the fitted signal data (`self.data`) and the model's internal
-        GQI kernel. The orientation distribution function (ODF) is computed
-        internally from the fitted data and is not provided externally.
-
+        based on the fitted signal data (``self.data``) and the model's internal
+        GQI kernel.
         Parameters
         ----------
         gtab : GradientTable
@@ -175,23 +175,30 @@ class GeneralizedQSamplingFit(ReconstFit):
         Returns
         -------
         pred_signal : ndarray
-            Predicted diffusion-weighted signal for the input `gtab`.
+            Predicted diffusion-weighted signal for the input ``gtab``.
 
         Notes
         -----
-        The predicted signal is reconstructed as:
+        Mathematically, the predicted signal :math:`\mathbf{S}_\mathrm{pred}`
+        is computed as:
 
         .. math::
 
-            \mathbf{S}_\mathrm{pred} = \mathrm{ODF} \cdot \mathbf{P}
+            \mathbf{S}_\mathrm{pred} = \max(0, \mathrm{ODF} \cdot K^{+})
 
-        where:
-            - \(\mathrm{ODF} = \mathbf{S}_\mathrm{data} \cdot \mathbf{K}\) is the
-            orientation distribution function computed internally from the
-            fitted signal data (\(\mathbf{S}_\mathrm{data}\)) and the forward
-            kernel (\(\mathbf{K}\)),
-            - \(\mathbf{P}\) is the reconstruction kernel (e.g., the pseudo-inverse
-            of \(\mathbf{K}\)), precomputed during model fitting.
+        Where:
+
+        - :math:`\mathrm{ODF} = K_\mathrm{model} \cdot \mathbf{S}_\mathrm{data}` is
+          the ODF computed from the fitted signal data
+        - :math:`K^{+}` is the pseudo-inverse kernel from `prediction_kernel`
+
+        Equivalently, this is here computed directly as:
+        .. math::
+
+            \mathbf{S}_\mathrm{pred} = \max(0, \mathbf{S}_\mathrm{data}
+            \cdot (K_\mathrm{model}^T \cdot K^{+}))
+
+        to avoid intermediate ODF calculation for efficiency.
         """
 
         # K_plus.shape = (n_vertices, n_gradients)
@@ -248,7 +255,6 @@ def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
 
 
 def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
-    # TODO: Double check docstring
     r"""
     Compute the regularized reconstruction kernel for ODF estimation in GQI.
 
@@ -281,9 +287,9 @@ def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
         \mathbf{K}^T \cdot (\mathbf{K} \mathbf{K}^T + \lambda \mathbf{I})^{-1}
 
     where:
-        - \(\mathbf{K} \in \mathbb{R}^{n_g \times n_v}\) is the GQI kernel,
-        - \(\lambda = 1 \times 10^{-6}\) (fixed regularization strength),
-        - \(\mathbf{I}\) is the \(n_g \times n_g\) identity matrix.
+        - :math:`\mathbf{K} \in \mathbb{R}^{n_g \times n_v}` is the GQI kernel,
+        - :math:`\lambda = 1 \times 10^{-6}` (fixed regularization strength),
+        - :math:`\mathbf{I}` is the :math:`n_g \times n_g` identity matrix.
     """
     # K.shape = (n_gradients, n_vertices)
     K = gqi_kernel(gtab, param_lambda, sphere, method=method)

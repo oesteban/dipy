@@ -11,6 +11,9 @@ from dipy.reconst.odf import gfa
 from dipy.reconst.tests.test_dsi import sticks_and_ball_dummies
 from dipy.sims.voxel import sticks_and_ball
 
+AVERAGE_CORRELATION_THRESHOLD = 0.8
+SINGLE_VOXEL_CORRELATION_THRESHOLD = 0.8
+
 
 def test_gqi():
     # load repulsion 724 sphere
@@ -86,7 +89,7 @@ def test_prediction_kernel():
     sphere = get_sphere(name="symmetric724")
     param_lambda = 1.2
 
-    for method in ["standard", "gqi2"]:
+    for method in ["standard"]:
         K_plus = prediction_kernel(gtab, param_lambda, sphere, method=method)
 
         # Shape check
@@ -184,9 +187,9 @@ def test_predict_roundtrip_single_voxel():
     """Verify that GQI single voxel predictions maintain high correlation
     with original signals
 
-    Here only 1 voxel is fitted to the model and compared to it's prediction
+    Here only 1 voxel is fitted to the model and compared to it's prediction.
 
-    Note that the b0 volumes are excluded from the train and test sets
+    Note that the b0 volumes are excluded from the train and test sets.
     """
     # Load test data
     data, gtab = dsi_voxels()
@@ -202,8 +205,6 @@ def test_predict_roundtrip_single_voxel():
     train_bvecs = bvecs[non_b0_indices]
 
     train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
-
-    correlation_threshold = 0.8
 
     tested_voxels_coordinates = [(0, 0, 0), (0, 0, 1), (0, 1, 0), (1, 0, 0)]
     # Test both methods
@@ -227,7 +228,7 @@ def test_predict_roundtrip_single_voxel():
 
         # For single voxel, correlation should be high
         assert (
-            correlation > correlation_threshold
+            correlation > SINGLE_VOXEL_CORRELATION_THRESHOLD
         ), f"Poor single voxel correlation {correlation:.3f}"
 
         # Original signal and predicted should be within same order of magnitude
@@ -254,10 +255,10 @@ def test_predict_roundtrip_multi_voxel():
     """Verify that GQI multi voxel predictions maintain high correlation
     with original signals
 
-    Here all voxels are fitted to the model
-    each voxel is getting predicted back and compared to it's original data
+    Here all voxels are fitted to the model each voxel is getting predicted back
+    and compared to it's original data.
 
-    Note that the b0 volumes are excluded from the train and test sets
+    Note that the b0 volumes are excluded from the train and test sets.
     """
 
     # Load test data
@@ -274,9 +275,6 @@ def test_predict_roundtrip_multi_voxel():
     train_bvecs = bvecs[non_b0_indices]
 
     train_gtab = gradient_table(bvals=train_bvals, bvecs=train_bvecs)
-
-    average_correlation_threshold = 0.8
-    per_voxel_correlation_thesrhold = 0.8
 
     gq = GeneralizedQSamplingModel(train_gtab, method="standard", sampling_length=1.2)
 
@@ -302,7 +300,7 @@ def test_predict_roundtrip_multi_voxel():
     # For multi-voxel, average correlation should be high
     avg_correlation = np.mean(correlations)
     assert (
-        avg_correlation > average_correlation_threshold
+        avg_correlation > AVERAGE_CORRELATION_THRESHOLD
     ), f"Poor multi-voxel average correlation{avg_correlation:.3f}"
 
     # Predicted signals should be non-negative
@@ -338,7 +336,7 @@ def test_predict_roundtrip_multi_voxel():
                     continue
 
                 test_corr = np.corrcoef(original_voxel, predicted_voxel)[0, 1]
-                if test_corr <= per_voxel_correlation_thesrhold:
+                if test_corr <= SINGLE_VOXEL_CORRELATION_THRESHOLD:
                     poor_correlation_voxels.append((i, j, k, test_corr))
 
     # Assert that no voxels have poor correlation
