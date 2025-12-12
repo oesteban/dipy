@@ -1,32 +1,70 @@
-# TODO: Finish and cleanup the example (also check the outputted images and prints)
 """
-===============================================
+=======================================================
 Predict unseen data with Generalized Q-Sampling Imaging
-===============================================
+=======================================================
 
-The ability to predict unseen data can be very useful when combined with
-the "Leave one out" framework.
+Predicting unseen diffusion data is particularly valuable in the context of
+the "leave-one-out" (LOO) framework, a cross-validation technique adapted from
+machine learning to diffusion MRI. In LOO, one or more diffusion gradient orientations
+are artificially removed from the dataset, the model is trained on the remaining data,
+and the missing signals are predicted. This process iterates across all orientations,
+allowing evaluation of model generalization without requiring multiple scans.
 
-This example procedure is heavily inspired by the
-NiPreps book :footcite:p:`Joseph_NiPreps_digital_book_2025`
+Unlike the standard GQI reconstruction (see
+:ref:`sphx_glr_examples_built_reconstruction_reconst_gqi.py`), which fits the model
+to the full dataset to compute orientation distribution functions (ODFs) and
+fiber peaks, this predictive approach simulates incomplete acquisitions (e.g., due to
+motion artifacts or limited scan time). It assesses how well GQI can infer missing
+diffusion signals from partial data, providing a quantitative measure of robustness.
 
-This idea works as follow:
+This capability supports various applications, including:
+
+    - Model cross-validation: Evaluating a model's adaptability to unseen
+      gradient directions, as demonstrated in
+      :ref:`sphx_glr_examples_built_reconstruction_kfold_xval.py`.
+    - Data cleaning: Identifying and correcting noisy or erroneous diffusion volumes
+      (e.g., motion artifacts) by comparing predicted vs. actual signals
+      :footcite:p:`Amitay2012`.
+    - Data augmentation: Generating synthetic diffusion data to enhance
+      training datasets for downstream tasks like tractography.
+
+For further reading, see Yeh et al. (2010) on GQI fundamentals :footcite:p:`Yeh2010`,
+and general LOO cross-validation in Hastie et al. (2009) :footcite:p:`Hastie2009`.
+
+This example demonstrates predicting unseen diffusion orientations using
+Generalized Q-Sampling Imaging (GQI) within a leave-one-out framework.
+
+We begin by loading and visualizing a sample diffusion MRI dataset. Next, we split
+the data into training and test sets, masking brain regions for efficient computation.
+The GQI model is then fitted to the training data and used to predict the held-out
+orientations. Finally, we compare the predictions against ground truth using
+visual plots and local correlation maps, highlighting the method's ability
+to enhance signal quality.
+
+The "leave one out" procedure works as follows:
 
     1. Leave one DWI orientation out.
     2. Fit the rest of the data to the GQI model.
     3. Predict the left out orientation.
     4. Run a volumetric registration algorithm between the original orientation and
        the predicted one.
-    5. Repeat for the whole dataset until convergence.
+    5. Repeat until all volumes have been visited
 
-However, to make this example more digest, we will only go through steps 1-3.
-For the registration step, you can refer to the
-:ref:`Affine Registration in 3D example
-<sphx_glr_examples_built_registration_affine_registration_3d.py>`
+However, we will restrict the demonstration to steps 1–3 to maintain
+a concise and readable example.
+
+Registration is used in the full procedure because predicted volumes may exhibit
+slight geometric distortions or misalignments compared to the originals, arising from
+the modeling assumptions. Aligning them via volumetric registration ensures accurate
+comparisons, such as correlation maps or error quantification, preventing artifacts
+from confounding the evaluation of prediction quality.
+
+Although registration is not demonstrated here, users interested in implementing step 4
+can refer to the :ref:`sphx_glr_examples_built_registration_affine_registration_3d.py`
+example for guidance on volumetric alignment techniques.
 
 We will also leave out 2 orientations instead of 1 to make the final comparison
 more meaningful.
-
 
 First import the necessary python modules:
 """
@@ -42,21 +80,22 @@ from dipy.io.image import load_nifti
 import dipy.reconst.gqi as gqi
 from dipy.segment.mask import median_otsu
 
-np.random.seed(42)
-
 ###############################################################################
 # Load the data, bvals and bvecs needed for the tutorial
-fraw, fbval, fbvec = get_fnames(name="stanford_hardi")
+
+fraw, fbval, fbvec = get_fnames(name="taiwan_ntu_dsi")
 
 data, affine, voxel_size = load_nifti(fraw, return_voxsize=True)
 bvals, bvecs = read_bvals_bvecs(fbval, fbvec)
+bvecs[1:] = bvecs[1:] / np.sqrt(np.sum(bvecs[1:] * bvecs[1:], axis=1))[:, None]
 gtab = gradient_table(bvals, bvecs=bvecs)
 
 print(f"data.shape {data.shape}")
 
-
 ###############################################################################
 # Display 5 random volumes to see what we are going to work with
+
+
 def plot_slice(data, bval, bvec, volume_idx, z_slice=None):
     """
     Plot a single axial slice from a 3D diffusion MRI volume.
@@ -84,8 +123,11 @@ def plot_slice(data, bval, bvec, volume_idx, z_slice=None):
     plt.show()
 
 
+# Setup a fix seed for random operations
+rng = np.random.default_rng(42)
+
 # Select 5 random slices to plot
-random_slices = np.random.choice(data.shape[-1], size=5, replace=False)
+random_slices = rng.choice(data.shape[-1], size=5, replace=False)
 for random_idx in random_slices:
     plot_slice(data[..., random_idx], bvals[random_idx], bvecs[random_idx], random_idx)
 
@@ -93,6 +135,7 @@ for random_idx in random_slices:
 # Split the data and gtab into train and test sets.
 #
 # We have to be careful to remove all the b0 volumes from both sets.
+
 b0_indices = np.where(gtab.b0s_mask)[0]
 non_b0_indices = np.where(~gtab.b0s_mask)[0]
 
@@ -101,7 +144,7 @@ n_test = 2
 n_train = len(non_b0_indices) - n_test
 
 # Shuffle only the non-b0 indices
-permuted_non_b0 = np.random.permutation(non_b0_indices)
+permuted_non_b0 = rng.permutation(non_b0_indices)
 train_idx = permuted_non_b0[:n_train]
 test_idx = permuted_non_b0[n_train:]
 
@@ -133,14 +176,15 @@ print(f"Number of test voxels: {test_data.size}")
 ###############################################################################
 # Now that our data is correctly prepared, we want to compute a brain mask to make
 # the computation faster
+
 masked_data, mask = median_otsu(data, vol_idx=[0])
 
 ###############################################################################
-# For each of the available GQI methods (standard and gqi2) we want to:
+# For each of the available GQI methods (``standard`` and ``gqi2``) we want to:
 #
-#  1. Create the according GQI model with the `train_gtabs`
-#  2. Fit the `train_data` to the GQO model
-#  3. Predict the unseen test data
+#  1. Create the according GQI model with the ``train_gtabs``
+#  2. Fit the ``train_data`` to the GQO model
+#  3. Predict the unseen ``test data``
 
 methods = ["standard", "gqi2"]
 method_predicted_data = {method: {} for method in methods}
@@ -156,17 +200,17 @@ for method in methods:
 
     method_predicted_data[method]["predicted_data"] = predicted_data
 
-
 ###############################################################################
-# Plot a comparison of the predicted results, this includes:
+# We now plot a comparison of the predicted results, this includes:
 #
 #   - The left out data
 #   - The predicted data
-#   - The b0 predicted data
 #   - A correlation map between the left data and it's prediction
+
+
 def local_correlation(real, pred, window_size=5):
     """
-    Compute a local Pearson correlation map between `real` and `pred`.
+    Compute a local Pearson correlation map between ``real`` and ``pred``.
     """
     if window_size % 2 == 0:
         raise ValueError("window_size must be odd.")
@@ -288,9 +332,15 @@ for i in range(len(test_idx)):
         test_bvecs[i],
         window_size=9,
     )
+
 ###############################################################################
-# We can see that the predicted left out orientation has
-# a higher SNR than the original data, while preserving signal information.
+# It should be noted that, at the current time, while the ``standard`` GQI model
+# prediction generates great images, this is not yet the case for the ``gqi2``
+# GQI model.
+#
+# Moreover, we can see that the ``standard model``’s predicted left-out orientations
+# have a higher SNR than the original data while still preserving signal information.
+#
 #
 # References
 # ----------
