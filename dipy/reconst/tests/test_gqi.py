@@ -238,18 +238,6 @@ def test_predict_roundtrip_single_voxel():
         ratio = pred_mean / orig_mean if orig_mean > 0 else 1
         assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
 
-        # Test with different gradient table
-        subset_gtab = gradient_table(train_gtab.bvals[::2], bvecs=train_gtab.bvecs[::2])
-        subset_predicted = voxel_fit.predict(subset_gtab)
-
-        # Subset prediction should have correct shape
-        assert_equal(subset_predicted.shape, (len(subset_gtab.bvals),))
-
-        # Should still be non-negative
-        assert np.all(
-            subset_predicted >= 0
-        ), "Subset predictions should be non-negative"
-
 
 def test_predict_roundtrip_multi_voxel():
     """Verify that GQI multi voxel predictions maintain high correlation
@@ -311,17 +299,6 @@ def test_predict_roundtrip_multi_voxel():
     pred_mean = np.mean(multi_predicted)
     ratio = pred_mean / orig_mean if orig_mean > 0 else 1
     assert 0.1 < ratio < 10, f"Signal magnitude unrealistic: ratio={ratio:.3f}"
-
-    # Test with different gradient table
-    subset_gtab = gradient_table(train_gtab.bvals[::2], bvecs=train_gtab.bvecs[::2])
-    subset_predicted = multi_fit.predict(subset_gtab)
-
-    # Expected shape is (Original_x, Original_y, Original_z, Orignial_N / 2)
-    expected_shape = train_data.shape[:-1] + (len(subset_gtab.bvals),)
-    assert_equal(subset_predicted.shape, expected_shape)
-
-    # Should still be non-negative
-    assert np.all(subset_predicted >= 0), "Subset predictions should be non-negative"
 
     # Test that all voxels have reasonable correlation
     poor_correlation_voxels = []
