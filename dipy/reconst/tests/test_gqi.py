@@ -89,7 +89,7 @@ def test_prediction_kernel():
     sphere = get_sphere(name="symmetric724")
     param_lambda = 1.2
 
-    for method in ["standard"]:
+    for method in ["standard", "gqi2"]:
         K_plus = prediction_kernel(gtab, param_lambda, sphere, method=method)
 
         # Shape check
