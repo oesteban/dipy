@@ -102,6 +102,8 @@ class GeneralizedQSamplingModel(ReconstModel):
     def fit(self, data, **kwargs):
         return GeneralizedQSamplingFit(self, data)
 
+    # TODO: What should be done here ?
+    # TODO: How to test ?
     def predict(self, odf, *, S0=None):
         """
         Predict a signal for this GeneralizedQSamplingModel instance given parameters.
@@ -147,22 +149,94 @@ class GeneralizedQSamplingFit(ReconstFit):
             self.odf_fit = self.odf(data)
         return self
 
-    def odf(self):
+    def odf(self, sphere=None):
         """Calculates the discrete ODF for a given discrete sphere."""
-        return self.model.kernel @ self.data
+        if sphere is None:
+            sphere = self.model.sphere
 
+        kernel = gqi_kernel(
+            self.model.gtab, self.model.Lambda, sphere, method=self.model.method
+        )
+        return self.data @ kernel
+
+    # TODO: Fix the interceptor / scale issue
     def predict(self, gtab, *, S0=None):
-        """Predict using the fit model."""
-        K = (
-            prediction_kernel(
-                gtab,
-                self.model.Lambda,
-                self.model.sphere,
-            )
-            @ self.model.kernel
+        r"""Predict diffusion signals using the fitted model.
+
+        This method reconstructs predicted signals for the given gradient table
+        based on the fitted signal data (``self.data``) and the model's internal
+        GQI kernel.
+
+        Parameters
+        ----------
+        gtab : GradientTable
+            The gradient table for which to predict signals.
+        S0 : array-like, optional
+            The baseline signal (b=0). If None, estimated from the model or data.
+
+        Returns
+        -------
+        pred_signal : ndarray
+            Predicted diffusion-weighted signal for the input ``gtab``.
+
+        Notes
+        -----
+        Mathematically, the predicted signal :math:`\mathbf{S}_\mathrm{pred}`
+        is computed as:
+
+        .. math::
+
+            \mathbf{S}_\mathrm{pred} = \max(0, \mathrm{ODF} \cdot K^{+})
+
+        Where:
+
+        - :math:`\mathrm{ODF} = K_\mathrm{model} \cdot \mathbf{S}_\mathrm{data}` is
+          the ODF computed from the fitted signal data.
+        - :math:`K^{+}` is the pseudo-inverse kernel from `prediction_kernel`.
+
+        Equivalently, this is here computed directly as:
+
+        .. math::
+
+            \mathbf{S}_\mathrm{pred} = \max(0, \mathbf{S}_\mathrm{data}
+            \cdot (K_\mathrm{model}^T \cdot K^{+}))
+
+        to avoid intermediate ODF calculation for efficiency.
+        """
+
+        # K_plus.shape = (n_vertices, n_gradients)
+        K_plus = prediction_kernel(
+            gtab,
+            self.model.Lambda,
+            self.model.sphere,
+            self.model.method,
         )
 
-        return (K @ self.data.T).T
+        # Fuse kernel and prediction kernel to avoid explicit ODF computation:
+        # combined_kernel.shape = (n_gradients_original, n_gradients)
+        combined_kernel = self.model.kernel.T @ K_plus
+
+        # Handle both 1D (single voxel) and multi-dimensional data
+        if self.data.ndim == 1:
+            # Single voxel: data = (self.model.n_gradients,)
+
+            # predicted.shape = (n_gradients, )
+            predicted = self.data @ combined_kernel
+        else:
+            # Multi-voxel: data = (..., self.model.n_gradients)
+            original_shape = self.data.shape
+            data_2d = self.data.reshape(-1, original_shape[-1])
+
+            # predicted_2d.shape = (n_voxels, n_gradients)
+            predicted_2d = data_2d @ combined_kernel
+
+            # predicted.shape = (..., n_gradients)
+            predicted = predicted_2d.reshape(
+                original_shape[:-1] + (combined_kernel.shape[1],)
+            )
+
+        # Clamp to non-negative values
+        return np.maximum(predicted, 0)
 
 
 def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
@@ -185,33 +259,50 @@ def gqi_kernel(gtab, param_lambda, sphere, method="standard"):
 
 def prediction_kernel(gtab, param_lambda, sphere, method="standard"):
     r"""
-    Predict a signal given the ODF.
+    Compute the regularized reconstruction kernel for ODF estimation in GQI.
+
+    This function computes the Tikhonov-regularized pseudo-inverse of the GQI
+    kernel matrix.
 
     Parameters
     ----------
-    odf : ndarray
-        ODF parameters.
-
     gtab : GradientTable
-        The gradient table for this prediction
+        The gradient table specifying diffusion directions and b-values.
+    param_lambda : float
+        GQI scaling parameter
+    sphere : Sphere
+        Spherical grid defining the ODF sampling directions (vertices).
+    method : str, optional
+        GQI kernel method ("standard" or "gqi2").
+
+    Returns
+    -------
+    kernel : ndarray, shape (n_vertices, n_gradients)
+        The Tikhonov-regularized pseudo-inverse kernel matrix.
 
     Notes
     -----
-    The predicted signal is given by:
+    The pseudo-inverse kernel (K_plus) is computed as:
 
     .. math::
 
-        S(\theta, b) = K_{ii}^{-1} \cdot ODF
+        \mathbf{K}^{+} =
+        \mathbf{K}^T \cdot (\mathbf{K} \mathbf{K}^T + \lambda \mathbf{I})^{-1}
 
-    where $K_{ii}^{-1}$, is the inverse of the GQI kernels for the direction(s) $ii$
-    given by ``gtab``.
-
+    where:
+        - :math:`\mathbf{K} \in \mathbb{R}^{n_g \times n_v}` is the GQI kernel,
+        - :math:`\lambda = 1 \times 10^{-6}` (fixed regularization strength),
+        - :math:`\mathbf{I}` is the :math:`n_g \times n_g` identity matrix.
     """
     # K.shape = (n_gradients, n_vertices)
     K = gqi_kernel(gtab, param_lambda, sphere, method=method)
+
+    # GTG.shape = (n_gradients, n_gradients)
     GtG = K @ K.T
     identity = np.eye(GtG.shape[0])
-    return np.linalg.inv(GtG + INVERSE_LAMBDA * identity) @ K
+
+    # K_plus.shape = (n_vertices, n_gradients)
+    return K.T @ np.linalg.inv(GtG + INVERSE_LAMBDA * identity)
 
 
 @warning_for_keywords()
